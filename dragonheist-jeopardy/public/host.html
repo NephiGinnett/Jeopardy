@@ -144,7 +144,8 @@ function render() {
   setHTML($('#gamePanel'), `
     <h2>Game</h2>
     <p>Players join at <span class="join-url">${esc(location.origin)}</span></p>
-    <p>Stream overlay: <span class="join-url">${esc(location.origin)}/overlay?host=Zoe</span></p>
+    <p>Stream board: <span class="join-url">${esc(location.origin)}/board?bottom=30</span></p>
+    <p>Stream podiums: <span class="join-url">${esc(location.origin)}/overlay?host=Zoe</span></p>
     <div class="row">
       ${act({ type: 'finalStart' }, 'Start Final Jeopardy', 'gold', locked)}
       ${act({ type: 'rerollDailyDouble' }, 'Move the Daily Double', '', !!cur)}

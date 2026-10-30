@@ -6,6 +6,7 @@ A live Jeopardy board for our Waterdeep: Dragon Heist campaign.
 - **Host** opens `/host`, logs in with the host password, and runs the board: open clues, open buzzers, mark answers right or wrong, reveal answers, and run Final Jeopardy.
 - A **Daily Double** is placed on a random tile (never the 100 row) each new game. Only the host can see where it is, and the "Move the Daily Double" button rerolls it.
 
+- **Stream board** (`/board`) is a display-only copy of the board for OBS. No name prompt, nothing clickable; clues, Daily Doubles, and Final Jeopardy appear on it as you run the game.
 - **Stream overlay** (`/overlay`) is a transparent layer with a contestant podium for each player. Podiums light up when someone buzzes in, flash green or red when you judge them, and count scores up and down.
 
 ## Run it locally
@@ -54,3 +55,12 @@ URL options (combine them with `&`):
 - `offline=hide` hides players who've disconnected instead of dimming them.
 
 Podiums stay in join order so nobody shuffles around mid-game. During Final Jeopardy, everyone's podium shows a "Wager locked" or "Answer locked" tag, and score changes stay hidden until you press **Reveal to players**.
+
+## Stream board (OBS background)
+
+Add a second **Browser** source at 1920 × 1080 with your Railway link plus `/board`, and put it *below* your webcam and podium layers.
+
+- `bottom=30` keeps the bottom 30% empty so the podiums sit under the board instead of on top of it.
+- `clues=hide` shows only the board, never the clue cards.
+
+Suggested layer order, top to bottom: podiums (`/overlay`), webcam, board (`/board`).

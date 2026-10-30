@@ -305,6 +305,7 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/host', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'host.html')));
 app.get('/overlay', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'overlay.html')));
+app.get('/board', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'board.html')));
 app.get('/health', (_req, res) => res.send('ok'));
 
 const server = http.createServer(app);
