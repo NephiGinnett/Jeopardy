@@ -64,3 +64,18 @@ Add a second **Browser** source at 1920 × 1080 with your Railway link plus `/bo
 - `clues=hide` shows only the board, never the clue cards.
 
 Suggested layer order, top to bottom: podiums (`/overlay`), webcam, board (`/board`).
+
+## Transition videos and music
+
+All media lives in the `Transition Materials` folder and is listed in `questions.json`:
+
+- Each category's `video` plays on the stream board the **first time** a tile from that category is picked.
+- `media.dailyDouble` plays whenever the Daily Double tile is picked (right after the category video, if both apply).
+- `media.intro` plays when you press **Play intro** on the host screen.
+- `media.music` loops on the stream board when you press **Start music**. It pauses during videos and picks up where it left off.
+
+While a video plays, players' phones show "Get ready…" and the clue stays hidden until it ends. You can press **Skip video** anytime, and for a Daily Double you can choose the player while the video is still playing.
+
+The videos and music play from the `/board` page, so keep it open (your OBS source counts). If no board is open, videos are skipped so the game never stalls, and that category's video still plays the first time a board is open. In OBS, tick **Control audio via OBS** on the board source to mix its sound. In a regular browser tab, click the page once (or the "Click to turn on sound" button) so the browser allows sound. Add `?music=0.3` to the board URL to change the music volume (0 to 1).
+
+To swap a video, drop the new file in `Transition Materials` and update its filename in `questions.json`.

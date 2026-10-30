@@ -17,6 +17,9 @@ if (ADMIN_PASSWORD === 'changeme') {
 }
 
 const ROWS = Q.categories[0].clues.length;
+const MEDIA = Q.media || {};
+const MEDIA_DIR = path.join(__dirname, MEDIA.folder || 'Transition Materials');
+const VIDEO_TIMEOUT_MS = 20000; // if no stream board reports back, move on anyway
 const MAX_VALUE = Math.max(...Q.categories.flatMap(c => c.clues.map(x => x.value)));
 
 // ---------- state ----------
@@ -31,18 +34,31 @@ function pickDailyDouble(used) {
 const freshFinal = () => ({ phase: 'off', wagers: {}, responses: {}, judged: {} });
 function freshState(players = {}) {
   const used = Q.categories.map(cat => cat.clues.map(() => false));
-  return { players, used, dailyDouble: pickDailyDouble(used), current: null, final: freshFinal() };
+  return {
+    players, used, dailyDouble: pickDailyDouble(used), current: null, final: freshFinal(),
+    seen: Q.categories.map(() => false), // has this category's video played yet?
+    video: null,                          // { queue: [file, ...], token }
+    music: state ? state.music : false,
+  };
 }
 function loadState() {
   try {
     const s = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
     const shapeOk = Array.isArray(s.used) && s.used.length === Q.categories.length &&
       s.used.every((col, i) => Array.isArray(col) && col.length === Q.categories[i].clues.length);
-    if (shapeOk && s.players && s.final) return s;
+    if (shapeOk && s.players && s.final) {
+      if (!Array.isArray(s.seen) || s.seen.length !== Q.categories.length) s.seen = Q.categories.map(() => false);
+      if (typeof s.music !== 'boolean') s.music = false;
+      // a video can't still be playing after a restart, so skip past it
+      s.video = null;
+      if (s.current && s.current.phase === 'transition') s.current.phase = s.current.pending || 'clue';
+      return s;
+    }
   } catch { /* no saved game yet */ }
   return freshState();
 }
-let state = loadState();
+let state = null;
+state = loadState();
 
 let saveTimer = null;
 function save() {
@@ -63,6 +79,40 @@ const cleanText = (v, max) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').tr
 const sign = v => (v === 'correct' ? 1 : v === 'wrong' ? -1 : 0);
 const clueAt = (c, r) => Q.categories[c] && Q.categories[c].clues[r];
 
+// ---------- transition videos ----------
+let videoToken = 0, videoTimer = null;
+function boardCount() {
+  let n = 0;
+  wss.clients.forEach(ws => { if (ws.readyState === 1 && ws.screen === 'board') n++; });
+  return n;
+}
+function mediaExists(file) { return !!file && fs.existsSync(path.join(MEDIA_DIR, file)); }
+function startVideos(files) {
+  const queue = files.filter(mediaExists);
+  // No stream board open means nobody would see the video, so don't make everyone wait.
+  if (!queue.length || boardCount() === 0) return finishVideos();
+  state.video = { queue, token: ++videoToken };
+  armVideoTimer();
+}
+function armVideoTimer() {
+  clearTimeout(videoTimer);
+  const t = state.video && state.video.token;
+  videoTimer = setTimeout(() => { if (state.video && state.video.token === t) { advanceVideo(t); changed(); } }, VIDEO_TIMEOUT_MS);
+}
+function advanceVideo(token) {
+  if (!state.video || state.video.token !== token) return false;
+  state.video.queue.shift();
+  if (state.video.queue.length) { state.video.token = ++videoToken; armVideoTimer(); }
+  else finishVideos();
+  return true;
+}
+function finishVideos() {
+  clearTimeout(videoTimer);
+  state.video = null;
+  const cur = state.current;
+  if (cur && cur.phase === 'transition') cur.phase = cur.pending;
+}
+
 // ---------- views (what each screen is allowed to see) ----------
 function onlineIds() {
   const s = new Set();
@@ -81,6 +131,9 @@ function baseView(isHost) {
     categories: Q.categories.map(c => c.name),
     values: Q.categories.map(c => c.clues.map(x => x.value)),
     maxValue: MAX_VALUE,
+    mediaBase: '/media/',
+    music: state.music && MEDIA.music ? MEDIA.music : null,
+    video: state.video ? { file: state.video.queue[0], token: state.video.token } : null,
     used: state.used,
     players: Object.entries(state.players)
       .map(([id, p], seat) => ({ id, seat, name: p.name, score: shownScore(id, p), online: online.has(id) }))
@@ -127,7 +180,7 @@ function broadcast() {
     const isHost = ws.role === 'host';
     const base = isHost ? views.host : views.other;
     const msg = { type: 'state', ...base, current: currentView(isHost), final: finalView(isHost, isHost ? null : ws.playerId) };
-    if (isHost) { msg.dailyDouble = state.dailyDouble; msg.questions = Q; }
+    if (isHost) { msg.dailyDouble = state.dailyDouble; msg.questions = Q; msg.boards = boardCount(); msg.seen = state.seen; }
     else {
       const p = state.players[ws.playerId];
       const mine = base.players.find(x => x.id === ws.playerId);
@@ -188,18 +241,26 @@ function handleHost(ws, m) {
     case 'openClue': {
       const c = toInt(m.c), r = toInt(m.r);
       if (cur || f.phase !== 'off' || !clueAt(c, r) || state.used[c][r]) return;
+      if (state.video) finishVideos(); // e.g. the intro was still playing
       const dd = state.dailyDouble;
       const isDD = !!dd && dd.c === c && dd.r === r;
+      const pending = isDD ? 'dd' : 'clue';
       state.current = {
         c, r, value: clueAt(c, r).value, isDD,
         ddPlayer: null, ddWager: null,
-        phase: isDD ? 'dd' : 'clue',
+        phase: 'transition', pending,
         answerShown: false, buzzOpen: false, queue: [], locked: [], results: {},
       };
+      // First pick in a category plays its video; the Daily Double tile plays the DD video.
+      const videos = [];
+      // (Only counts as seen when a stream board is open to actually show it.)
+      if (!state.seen[c] && boardCount() > 0) { state.seen[c] = true; videos.push(Q.categories[c].video); }
+      if (isDD) videos.push(MEDIA.dailyDouble);
+      startVideos(videos);
       return changed();
     }
     case 'ddSetPlayer': {
-      if (!cur || !cur.isDD || cur.phase !== 'dd') return;
+      if (!cur || !cur.isDD || !(cur.phase === 'dd' || cur.phase === 'transition')) return;
       if (m.playerId && !player(m.playerId)) return;
       cur.ddPlayer = m.playerId || null; cur.ddWager = null;
       return changed();
@@ -244,6 +305,7 @@ function handleHost(ws, m) {
     case 'revealAnswer': if (cur && cur.phase === 'clue') { cur.answerShown = true; cur.buzzOpen = false; changed(); } return;
     case 'closeClue': {
       if (!cur) return;
+      if (state.video) finishVideos();
       if (m.markUsed) state.used[cur.c][cur.r] = true;
       state.current = null;
       return changed();
@@ -272,6 +334,13 @@ function handleHost(ws, m) {
       if (!cur && clueAt(c, r)) { state.used[c][r] = false; changed(); }
       return;
     }
+    case 'playIntro': {
+      if (cur || state.video || f.phase !== 'off') return;
+      startVideos([MEDIA.intro]);
+      return changed();
+    }
+    case 'skipVideo': if (state.video) { finishVideos(); changed(); } return;
+    case 'setMusic': state.music = !!m.on; return changed();
     case 'rerollDailyDouble': if (!cur) { state.dailyDouble = pickDailyDouble(state.used); changed(); } return;
 
     // Final Jeopardy
@@ -306,6 +375,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/host', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'host.html')));
 app.get('/overlay', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'overlay.html')));
 app.get('/board', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'board.html')));
+app.use('/media', express.static(MEDIA_DIR));
 app.get('/health', (_req, res) => res.send('ok'));
 
 const server = http.createServer(app);
@@ -324,6 +394,7 @@ wss.on('connection', ws => {
           ws.role = 'host';
         } else if (m.role === 'overlay') {
           ws.role = 'overlay'; // read-only stream view, sees what players see
+          if (m.screen === 'board') ws.screen = 'board'; // plays the videos and music
         } else {
           const id = cleanId(m.id);
           if (!id) return;
@@ -331,6 +402,10 @@ wss.on('connection', ws => {
         }
         send(ws, { type: 'welcome', role: ws.role });
         return broadcast();
+      }
+      if (m.type === 'videoDone' && (ws.screen === 'board' || ws.role === 'host')) {
+        if (advanceVideo(m.token)) changed();
+        return;
       }
       if (ws.role === 'player') handlePlayer(ws, m);
       else if (ws.role === 'host') handleHost(ws, m);

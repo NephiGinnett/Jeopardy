@@ -146,6 +146,11 @@ function render() {
     <p>Players join at <span class="join-url">${esc(location.origin)}</span></p>
     <p>Stream board: <span class="join-url">${esc(location.origin)}/board?bottom=30</span></p>
     <p>Stream podiums: <span class="join-url">${esc(location.origin)}/overlay?host=Zoe</span></p>
+    <p>${S.boards ? `Stream board connected${S.boards > 1 ? ` (${S.boards} open)` : ''}.` : 'No stream board open, so videos will be skipped. Open /board (or your OBS source) to play them.'}</p>
+    <div class="row">
+      ${act({ type: 'playIntro' }, 'Play intro', '', locked || !!S.video)}
+      ${act({ type: 'setMusic', on: !S.music }, S.music ? 'Stop music' : 'Start music')}
+    </div>
     <div class="row">
       ${act({ type: 'finalStart' }, 'Start Final Jeopardy', 'gold', locked)}
       ${act({ type: 'rerollDailyDouble' }, 'Move the Daily Double', '', !!cur)}
@@ -153,7 +158,12 @@ function render() {
     </div>`);
 }
 
+function videoNote() {
+  return S.video ? `<p>Playing on stream: <b>${esc(S.video.file)}</b></p><div class="row">${act({ type: 'skipVideo' }, 'Skip video')}</div>` : '';
+}
+
 function clueControl(cur) {
+  if (!cur && S.video) return `<h2>Intro</h2>${videoNote()}`;
   if (!cur) {
     const left = S.used.flat().filter(u => !u).length;
     return `<h2>Board</h2><p>${left ? `Pick a tile to open it. ${left} clue${left === 1 ? '' : 's'} left.` : 'The board is clear. Time for Final Jeopardy!'}</p>`;
@@ -164,6 +174,12 @@ function clueControl(cur) {
   const close = `<div class="row">${act({ type: 'closeClue', markUsed: true }, 'Back to board', 'gold')}
     ${act({ type: 'closeClue', markUsed: false }, 'Cancel and keep tile')}</div>`;
 
+  if (cur.phase === 'transition') {
+    const opts = S.players.map(p => `<option value="${esc(p.id)}" ${p.id === cur.ddPlayer ? 'selected' : ''}>${esc(p.name)} (${fmt(p.score)})</option>`).join('');
+    return `<h2>${cur.isDD ? '<span class="badge">Daily Double</span>' : 'Transition'}</h2>${head}${videoNote()}
+      ${cur.isDD ? `<p>Who picked this tile?</p><select data-dd-select><option value="">Choose a player…</option>${opts}</select>` : '<p>The clue appears when the video ends.</p>'}
+      ${clue}${close}`;
+  }
   if (cur.phase === 'dd') {
     const opts = S.players.map(p => `<option value="${esc(p.id)}" ${p.id === cur.ddPlayer ? 'selected' : ''}>${esc(p.name)} (${fmt(p.score)})</option>`).join('');
     return `<h2><span class="badge">Daily Double</span></h2>${head}

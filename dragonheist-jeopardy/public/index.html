@@ -130,6 +130,10 @@ function overlayHTML(me) {
 
   const meta = `<div class="meta"><span>${esc(cur.category)}</span><b>${cur.isDD && cur.ddWager != null ? 'Wager ' + fmt(cur.ddWager) : fmt(cur.value)}</b></div>`;
 
+  if (cur.phase === 'transition') {
+    return `<div class="overlay"><div class="card">${cur.isDD ? '<div class="seal">Daily<br>Double</div>' : ''}<div class="meta"><span>${esc(cur.category)}</span><b>${fmt(cur.value)}</b></div>
+      <p class="clue">Get ready…</p><div class="status">Watch the stream!</div></div></div>`;
+  }
   if (cur.phase === 'dd') {
     let body;
     if (!cur.ddPlayer) body = '<p>The host is choosing who takes it.</p>';
