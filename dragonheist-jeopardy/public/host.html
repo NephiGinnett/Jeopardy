@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1430">
+<title>Host · Dragon Heist Jeopardy</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,700;1,400&family=Alegreya+Sans:wght@400;700&family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .wrap { max-width: 1400px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .panel { background: var(--ink-2); border: 1px solid #26326c; border-radius: 4px; padding: 14px; margin-bottom: 14px; }
+  .panel p { margin: 6px 0; color: var(--mist); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .host-clue { font-family: var(--serif); font-size: 1.35rem; line-height: 1.35; margin: 10px 0; color: var(--text); }
+  .host-answer { font-family: var(--serif); font-style: italic; font-size: 1.15rem; color: var(--gold);
+    border-left: 3px solid var(--gold); padding: 4px 0 4px 10px; margin: 8px 0; }
+  .host-answer small { display: block; font-style: normal; font-family: var(--sans); color: var(--mist); font-size: .8rem; }
+  .meta-line { display: flex; justify-content: space-between; font-family: var(--display); color: var(--parchment); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .8rem; font-weight: 700; background: var(--seal); color: var(--parchment); }
+  .queue { list-style: none; padding: 0; margin: 10px 0 0; }
+  .queue li { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 3px; background: rgba(0,0,0,.18); margin-bottom: 6px; }
+  .queue li.first { background: rgba(226,185,85,.16); outline: 1px solid var(--gold-dim); }
+  .queue .who { flex: 1; font-weight: 700; }
+  .players .score-row { flex-wrap: wrap; }
+  .players .ctl { display: flex; gap: 4px; }
+  select { padding: 8px; border-radius: 3px; background: var(--ink); color: var(--text); border: 1px solid var(--tile-edge); }
+  .join-url { font-weight: 700; color: var(--parchment); word-break: break-all; }
+  .login { max-width: 380px; margin: 14vh auto 0; text-align: center; }
+  .login form { display: grid; gap: 10px; margin-top: 20px; }
+  .login input { padding: 12px; font-size: 1.1rem; border-radius: 3px; border: 1px solid var(--tile-edge); background: var(--ink-2); color: var(--text); text-align: center; }
+  .legend { color: var(--mist); font-size: .9rem; margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+  .legend .dd-mark { position: static; display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--seal); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section id="login" class="login">
+    <h1 class="wordmark">Host the board<small>Dragon Heist Jeopardy</small></h1>
+    <form id="loginForm">
+      <input id="pw" type="password" placeholder="Host password" autocomplete="current-password" required>
+      <button class="btn gold" type="submit">Open host board</button>
+      <div class="error" id="loginError"></div>
+    </form>
+  </section>
+
+  <section id="app" hidden>
+    <div class="topbar">
+      <h1 class="wordmark">Dragon Heist Jeopardy<small>Host board</small></h1>
+    </div>
+    <div class="layout">
+      <div>
+        <div class="board" id="board"></div>
+        <div class="legend"><span class="dd-mark"></span> Daily Double (only you can see this)</div>
+      </div>
+      <div>
+        <div class="panel" id="control"></div>
+        <div class="panel players"><h2>Players</h2><div id="players"></div></div>
+        <div class="panel" id="gamePanel"></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="conn" id="conn" hidden>Reconnecting…</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => (n < 0 ? '−' : '') + Math.abs(n).toLocaleString();
+function setHTML(el, html) { if (el._h !== html) { el.innerHTML = html; el._h = html; } }
+const act = (msg, label, cls = '', disabled = false) =>
+  `<button class="btn ${cls}" type="button" data-msg="${esc(JSON.stringify(msg))}" ${disabled ? 'disabled' : ''}>${label}</button>`;
+
+let ws, S = null, password = sessionStorage.getItem('jp_host_pw') || '';
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => { $('#conn').hidden = true; if (password) ws.send(JSON.stringify({ type: 'hello', role: 'host', password })); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'error' && m.code === 'bad_password') {
+      password = ''; sessionStorage.removeItem('jp_host_pw');
+      $('#loginError').textContent = m.message; $('#login').hidden = false; $('#app').hidden = true;
+    }
+    if (m.type === 'welcome') { sessionStorage.setItem('jp_host_pw', password); $('#login').hidden = true; $('#app').hidden = false; }
+    if (m.type === 'state') { S = m; render(); }
+  };
+  ws.onclose = () => { if (password) $('#conn').hidden = false; setTimeout(connect, 1500); };
+}
+const sendMsg = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+
+$('#loginForm').addEventListener('submit', e => {
+  e.preventDefault();
+  password = $('#pw').value;
+  $('#loginError').textContent = '';
+  sendMsg({ type: 'hello', role: 'host', password });
+});
+
+const nameOf = id => (S.players.find(p => p.id === id) || {}).name || 'Unknown';
+
+function render() {
+  if (!S) return;
+  const cur = S.current, f = S.final, dd = S.dailyDouble;
+  const locked = !!cur || f.phase !== 'off';
+
+  // Board
+  let b = '';
+  S.categories.forEach(c => { b += `<div class="cat">${esc(c)}</div>`; });
+  for (let r = 0; r < S.values[0].length; r++) {
+    S.categories.forEach((_, c) => {
+      const used = S.used[c][r];
+      const isDD = dd && dd.c === c && dd.r === r;
+      const active = cur && cur.c === c && cur.r === r;
+      const title = used ? 'Used. Click to put it back on the board.' : `Open ${esc(S.categories[c])} for ${S.values[c][r]}`;
+      b += `<button type="button" class="tile ${used ? 'used' : ''} ${active ? 'active' : ''}" data-tile="${c},${r}" title="${title}" ${locked && !active ? 'disabled' : ''}>
+        ${used ? '' : S.values[c][r]}${isDD && !used ? '<span class="dd-mark"></span>' : ''}</button>`;
+    });
+  }
+  const board = $('#board');
+  board.style.setProperty('--cols', S.categories.length);
+  setHTML(board, b);
+
+  setHTML($('#control'), f.phase !== 'off' ? finalControl(f) : clueControl(cur));
+
+  setHTML($('#players'), S.players.map(p => `
+    <div class="score-row">
+      <span class="dot ${p.online ? '' : 'off'}" title="${p.online ? 'Online' : 'Offline'}"></span>
+      <span class="who">${esc(p.name)}</span>
+      <span class="pts ${p.score < 0 ? 'neg' : ''}">${fmt(p.score)}</span>
+      <span class="ctl">
+        ${act({ type: 'adjustScore', playerId: p.id, delta: -100 }, '−100', 'small quiet')}
+        ${act({ type: 'adjustScore', playerId: p.id, delta: 100 }, '+100', 'small quiet')}
+        <button class="btn small quiet" type="button" data-set-score="${esc(p.id)}">Set</button>
+        <button class="btn small quiet" type="button" data-remove="${esc(p.id)}" title="Remove player">✕</button>
+      </span>
+    </div>`).join('') || '<p>No one has joined yet. Send your friends the link below.</p>');
+
+  setHTML($('#gamePanel'), `
+    <h2>Game</h2>
+    <p>Players join at <span class="join-url">${esc(location.origin)}</span></p>
+    <div class="row">
+      ${act({ type: 'finalStart' }, 'Start Final Jeopardy', 'gold', locked)}
+      ${act({ type: 'rerollDailyDouble' }, 'Move the Daily Double', '', !!cur)}
+      <button class="btn bad" type="button" data-reset ${cur ? 'disabled' : ''}>New game</button>
+    </div>`);
+}
+
+function clueControl(cur) {
+  if (!cur) {
+    const left = S.used.flat().filter(u => !u).length;
+    return `<h2>Board</h2><p>${left ? `Pick a tile to open it. ${left} clue${left === 1 ? '' : 's'} left.` : 'The board is clear. Time for Final Jeopardy!'}</p>`;
+  }
+  const head = `<div class="meta-line"><span>${esc(cur.category)}</span><span>${fmt(cur.value)}</span></div>`;
+  const clue = `<div class="host-clue">${esc(cur.clue)}</div>
+    <div class="host-answer"><small>${cur.answerShown ? 'Answer (players can see it)' : 'Answer (only you can see it)'}</small>${esc(cur.answer)}</div>`;
+  const close = `<div class="row">${act({ type: 'closeClue', markUsed: true }, 'Back to board', 'gold')}
+    ${act({ type: 'closeClue', markUsed: false }, 'Cancel and keep tile')}</div>`;
+
+  if (cur.phase === 'dd') {
+    const opts = S.players.map(p => `<option value="${esc(p.id)}" ${p.id === cur.ddPlayer ? 'selected' : ''}>${esc(p.name)} (${fmt(p.score)})</option>`).join('');
+    return `<h2><span class="badge">Daily Double</span></h2>${head}
+      <p>Who picked this tile?</p>
+      <select data-dd-select><option value="">Choose a player…</option>${opts}</select>
+      <p>${!cur.ddPlayer ? 'They’ll enter their wager on their phone.' : cur.ddWager == null ? `Waiting for ${esc(nameOf(cur.ddPlayer))} to wager…` : `${esc(nameOf(cur.ddPlayer))} wagered <b>${fmt(cur.ddWager)}</b>.`}</p>
+      <div class="row">
+        <button class="btn small" type="button" data-dd-wager ${cur.ddPlayer ? '' : 'disabled'}>Enter wager for them</button>
+        ${act({ type: 'ddShowClue' }, 'Show clue', 'gold', cur.ddWager == null)}
+      </div>
+      ${clue}${close}`;
+  }
+
+  if (cur.isDD) {
+    const res = cur.results[cur.ddPlayer];
+    return `<h2><span class="badge">Daily Double</span> ${esc(nameOf(cur.ddPlayer))} for ${fmt(cur.ddWager)}</h2>${head}${clue}
+      <div class="row">
+        ${res ? `<p>Marked ${res}.</p>` : act({ type: 'judge', playerId: cur.ddPlayer, correct: true }, 'Correct', 'good') + act({ type: 'judge', playerId: cur.ddPlayer, correct: false }, 'Wrong', 'bad')}
+        ${cur.answerShown ? '' : act({ type: 'revealAnswer' }, 'Reveal answer to players')}
+      </div>${close}`;
+  }
+
+  const queue = cur.queue.map((id, i) => `<li class="${i === 0 ? 'first' : ''}">
+      <span class="who">${i + 1}. ${esc(nameOf(id))}</span>
+      ${act({ type: 'judge', playerId: id, correct: true }, 'Correct', 'small good')}
+      ${act({ type: 'judge', playerId: id, correct: false }, 'Wrong', 'small bad')}
+    </li>`).join('');
+  const lockedOut = cur.locked.length ? `<p>Locked out: ${cur.locked.map(id => esc(nameOf(id))).join(', ')}</p>` : '';
+  const winner = Object.entries(cur.results).find(([, v]) => v === 'correct');
+  return `<h2>Clue</h2>${head}${clue}
+    <div class="row">
+      ${cur.answerShown ? '' : cur.buzzOpen ? act({ type: 'closeBuzzers' }, 'Close buzzers') : act({ type: 'openBuzzers' }, 'Open buzzers', 'gold')}
+      ${cur.queue.length || cur.locked.length ? act({ type: 'resetBuzzers' }, 'Clear buzzes', 'quiet') : ''}
+      ${cur.answerShown ? '' : act({ type: 'revealAnswer' }, 'Reveal answer to players')}
+    </div>
+    ${winner ? `<p>${esc(nameOf(winner[0]))} got it!</p>` : ''}
+    ${cur.buzzOpen && !cur.queue.length ? '<p>Buzzers are open. Waiting for someone to buzz…</p>' : ''}
+    ${queue ? `<ul class="queue">${queue}</ul>` : ''}${lockedOut}${close}`;
+}
+
+function finalControl(f) {
+  const head = `<h2>Final Jeopardy</h2><div class="meta-line"><span>${esc(f.category)}</span></div>
+    <div class="host-clue">${esc(f.clue)}</div>
+    <div class="host-answer"><small>${f.phase === 'reveal' ? 'Answer (players can see it)' : 'Answer (only you can see it)'}</small>${esc(f.answer)}</div>`;
+  const tick = list => S.players.map(p => `${esc(p.name)} ${list.includes(p.id) ? '✓' : '…'}`).join(' &nbsp; ');
+
+  if (f.phase === 'wager') return head + `<p>Players see only the category and are wagering now.</p><p>${tick(f.wagered)}</p>
+    <div class="row">${act({ type: 'finalShowClue' }, 'Show clue', 'gold')}${act({ type: 'finalEnd' }, 'Cancel Final Jeopardy', 'quiet')}</div>`;
+  if (f.phase === 'clue') return head + `<p>Players are typing their answers.</p><p>${tick(f.responded)}</p>
+    <div class="row">${act({ type: 'finalLock' }, 'Lock answers', 'gold')}</div>`;
+
+  const rows = S.players.map(p => {
+    const j = f.judged[p.id];
+    return `<li class="${j ? '' : 'first'}"><span class="who">${esc(p.name)}: <i>${esc(f.responses[p.id] ?? '(no answer)')}</i><br><small>Wager ${fmt(f.wagers[p.id] ?? 0)}${j ? `, marked ${j}` : ''}</small></span>
+      ${act({ type: 'finalJudge', playerId: p.id, correct: true }, 'Correct', 'small good', j === 'correct')}
+      ${act({ type: 'finalJudge', playerId: p.id, correct: false }, 'Wrong', 'small bad', j === 'wrong')}</li>`;
+  }).join('');
+  return head + `<ul class="queue">${rows}</ul><div class="row">
+    ${f.phase === 'judging' ? act({ type: 'finalReveal' }, 'Reveal to players', 'gold') : act({ type: 'finalEnd' }, 'Close Final Jeopardy', 'gold')}</div>`;
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('button');
+  if (!t || t.disabled) return;
+  if (t.dataset.msg) return sendMsg(JSON.parse(t.dataset.msg));
+  if (t.dataset.tile) {
+    const [c, r] = t.dataset.tile.split(',').map(Number);
+    if (S.used[c][r]) { if (confirm('Put this clue back on the board?')) sendMsg({ type: 'unuseTile', c, r }); }
+    else sendMsg({ type: 'openClue', c, r });
+    return;
+  }
+  if (t.dataset.setScore) {
+    const v = prompt(`New score for ${nameOf(t.dataset.setScore)}:`);
+    if (v !== null && v.trim() !== '' && !isNaN(Number(v))) sendMsg({ type: 'setScore', playerId: t.dataset.setScore, score: Number(v) });
+    return;
+  }
+  if (t.dataset.remove) {
+    if (confirm(`Remove ${nameOf(t.dataset.remove)} from the game?`)) sendMsg({ type: 'removePlayer', playerId: t.dataset.remove });
+    return;
+  }
+  if (t.hasAttribute('data-dd-wager')) {
+    const v = prompt(`Wager for ${nameOf(S.current.ddPlayer)}:`);
+    if (v !== null && v.trim() !== '' && !isNaN(Number(v))) sendMsg({ type: 'ddSetWager', amount: Number(v) });
+    return;
+  }
+  if (t.hasAttribute('data-reset')) {
+    if (confirm('Start a new game? Scores go back to 0 and the Daily Double moves. Players stay joined.')) sendMsg({ type: 'resetGame' });
+  }
+});
+document.addEventListener('change', e => {
+  if (e.target.matches('[data-dd-select]')) sendMsg({ type: 'ddSetPlayer', playerId: e.target.value || null });
+});
+
+connect();
+</script>
+</body>
+</html>
