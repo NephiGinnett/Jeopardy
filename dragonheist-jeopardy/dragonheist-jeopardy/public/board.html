@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920, initial-scale=1">
+<title>Board · Dragon Heist Jeopardy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,700;1,400;1,700&family=Alegreya+Sans:wght@400;700&family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  /*
+    Display-only board for OBS. Add as a Browser Source at 1920x1080.
+    Nobody can click anything here; it just mirrors the game.
+    Optional URL settings:
+      ?bottom=30     keeps the bottom 30% of the screen empty (room for the podium overlay)
+      ?clues=hide    shows only the board, never the clue cards
+      ?music=0.3     background music volume, 0 to 1 (default 0.3)
+    This page plays the transition videos and background music, so keep it open
+    during the game. In OBS, tick "Control audio via OBS" to mix its sound.
+  */
+  html, body { width: 100vw; height: 100vh; overflow: hidden; }
+  .screen-wrap {
+    position: absolute; left: 0; right: 0; top: 0;
+    bottom: var(--bottom, 0vh);
+    padding: 2.2vh 2.2vw; display: flex; flex-direction: column; gap: 1.4vh;
+  }
+  .title { text-align: center; font-family: var(--display); color: var(--gold); font-weight: 700;
+    font-size: 2.4vw; margin: 0; letter-spacing: .04em; text-shadow: 0 .3vh 0 rgba(0,0,0,.4); }
+  .big-board { flex: 1; min-height: 0; display: grid; gap: .45vw;
+    grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr));
+    grid-template-rows: auto repeat(var(--rows, 5), minmax(0, 1fr)); }
+  .big-board .cat { font-size: 1.35vw; min-height: 0; padding: 1vh .6vw; border-bottom-width: .3vh; }
+  .big-board .tile { aspect-ratio: auto; font-size: 3.6vw; }
+  .big-board .tile.active { outline-width: .3vw; outline-offset: -.3vw; }
+
+  /* clue cards fill the board area */
+  .stage-card { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 4vh 6vw; background: rgba(7, 10, 26, .88); }
+  .stage-card .card { max-width: 72vw; padding: 4vh 3.4vw 3.6vh; }
+  .stage-card .meta { font-size: 1.5vw; }
+  .stage-card .clue { font-size: 3.4vw; line-height: 1.3; margin: 3vh 0 1vh; }
+  .stage-card .answer { font-size: 2.4vw; margin-top: 2.4vh; padding-top: 2vh; }
+  .stage-card .status { font-size: 1.5vw; margin-top: 2vh; }
+  .stage-card .seal { width: 11vw; height: 11vw; font-size: 1.7vw; margin: -1vh auto 2vh; }
+  .stage-card .reveal-list li { font-size: 1.4vw; padding: 1vh 0; }
+  .stage-card p { font-size: 1.6vw; }
+  /* transition videos cover everything */
+  .video-layer { position: fixed; inset: 0; z-index: 100; background: #000; display: none; }
+  .video-layer.on { display: block; }
+  .video-layer video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .sound-prompt { position: fixed; top: 2vh; left: 50%; transform: translateX(-50%); z-index: 200;
+    background: var(--seal); color: var(--parchment); border: none; border-radius: 999px;
+    padding: 1.2vh 2vw; font: 700 1.4vw var(--sans); cursor: pointer; }
+  .waiting { text-align: center; color: var(--mist); font-size: 1.6vw; margin: auto; }
+</style>
+</head>
+<body>
+<div class="screen-wrap" id="wrap">
+  <h1 class="title" id="title">Dragon Heist Jeopardy</h1>
+  <div class="big-board" id="board"><div class="waiting">Connecting to the game…</div></div>
+  <div id="card"></div>
+</div>
+<div class="video-layer" id="videoLayer"><video id="video" playsinline preload="auto"></video></div>
+<audio id="music" loop preload="auto"></audio>
+<button class="sound-prompt" id="soundPrompt" hidden>Click to turn on sound</button>
+
+<script>
+const params = new URLSearchParams(location.search);
+const hideClues = params.get('clues') === 'hide';
+const musicVolume = Math.min(1, Math.max(0, Number(params.get('music') ?? 0.3)));
+const bottom = Number(params.get('bottom'));
+if (bottom > 0) document.documentElement.style.setProperty('--bottom', Math.min(bottom, 80) + 'vh');
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => (n < 0 ? '−' : '') + Math.abs(n).toLocaleString();
+function setHTML(el, html) { if (el._h !== html) { el.innerHTML = html; el._h = html; } }
+
+let S = null;
+const nameOf = id => (S.players.find(p => p.id === id) || {}).name || 'Someone';
+
+function render() {
+  const cur = S.current, f = S.final;
+  $('#title').textContent = S.title || 'Jeopardy';
+
+  const board = $('#board');
+  board.style.setProperty('--cols', S.categories.length);
+  board.style.setProperty('--rows', S.values[0].length);
+  let b = S.categories.map(c => `<div class="cat">${esc(c)}</div>`).join('');
+  for (let r = 0; r < S.values[0].length; r++) {
+    S.categories.forEach((_, c) => {
+      const used = S.used[c][r];
+      const active = cur && cur.c === c && cur.r === r;
+      b += `<div class="tile ${used ? 'used' : ''} ${active ? 'active' : ''}">${used ? '' : S.values[c][r]}</div>`;
+    });
+  }
+  setHTML(board, b);
+  setHTML($('#card'), hideClues ? '' : cardHTML(cur, f));
+}
+
+function cardHTML(cur, f) {
+  if (cur && cur.phase === 'transition') return '';
+  if (f.phase !== 'off') return `<div class="stage-card"><div class="card">${finalHTML(f)}</div></div>`;
+  if (!cur) return '';
+  const meta = `<div class="meta"><span>${esc(cur.category)}</span><b>${cur.isDD && cur.ddWager != null ? 'Wager ' + fmt(cur.ddWager) : fmt(cur.value)}</b></div>`;
+
+  if (cur.phase === 'dd') {
+    const who = cur.ddPlayer ? `<p><b>${esc(nameOf(cur.ddPlayer))}</b> ${cur.ddWager == null ? 'is deciding on a wager…' : `wagers <b>${fmt(cur.ddWager)}</b>.`}</p>` : '';
+    return `<div class="stage-card"><div class="card"><div class="seal">Daily<br>Double</div>${meta}${who}</div></div>`;
+  }
+
+  let status = '';
+  if (cur.isDD) {
+    const res = cur.results[cur.ddPlayer];
+    status = res === 'correct' ? `${esc(nameOf(cur.ddPlayer))} got it!` : res === 'wrong' ? `Not quite, ${esc(nameOf(cur.ddPlayer))}.` : `${esc(nameOf(cur.ddPlayer))}’s Daily Double`;
+  } else if (!cur.answerShown) {
+    if (cur.queue.length) status = `${esc(nameOf(cur.queue[0]))} buzzed in!`;
+    else if (cur.buzzOpen) status = 'Buzzers are open!';
+  } else {
+    const winner = Object.entries(cur.results).find(([, v]) => v === 'correct');
+    if (winner) status = `${esc(nameOf(winner[0]))} got it!`;
+  }
+  const answer = cur.answerShown && cur.answer ? `<div class="answer">${esc(cur.answer)}</div>` : '';
+  return `<div class="stage-card"><div class="card">${meta}<div class="clue">${esc(cur.clue)}</div>${answer}<div class="status">${status}</div></div></div>`;
+}
+
+function finalHTML(f) {
+  const head = `<div class="meta"><span>Final Jeopardy</span><b>${esc(f.category)}</b></div>`;
+  const count = list => `${list.length} of ${S.players.length}`;
+  if (f.phase === 'wager') return head + `<div class="clue">The category is ${esc(f.category)}</div><p>Wagers locked in: ${count(f.wagered)}</p>`;
+  if (f.phase === 'clue') return head + `<div class="clue">${esc(f.clue)}</div><p>Answers locked in: ${count(f.responded)}</p>`;
+  if (f.phase === 'judging') return head + `<div class="clue">${esc(f.clue)}</div><p>Answers are locked. The host is judging…</p>`;
+  const rows = S.players.map(p => {
+    const j = f.judged[p.id], w = f.wagers[p.id] ?? 0;
+    const mark = j === 'correct' ? `<span class="mark-correct">+${fmt(w)}</span>` : j === 'wrong' ? `<span class="mark-wrong">−${fmt(w)}</span>` : '';
+    return `<li><b>${esc(p.name)}</b><span class="resp">${esc(f.responses[p.id] ?? '(no answer)')}</span>${mark}</li>`;
+  }).join('');
+  return head + `<div class="clue">${esc(f.clue)}</div><div class="answer">${esc(f.answer)}</div><ul class="reveal-list">${rows}</ul>`;
+}
+
+// ---------- videos & music ----------
+const video = $('#video'), layer = $('#videoLayer'), music = $('#music'), prompt = $('#soundPrompt');
+music.volume = musicVolume;
+let ws, playingToken = null, musicFile = null;
+const mediaURL = file => S.mediaBase + encodeURIComponent(file);
+
+function reportDone(token) {
+  if (token == null || token !== playingToken) return;
+  playingToken = null;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'videoDone', token }));
+}
+video.addEventListener('ended', () => reportDone(playingToken));
+video.addEventListener('error', () => reportDone(playingToken)); // a broken file shouldn't stall the game
+
+// Browsers block sound until someone clicks the page. OBS doesn't, so this prompt only shows in a normal tab.
+function tryPlay(el) {
+  return el.play().catch(() => {
+    if (el === video) { video.muted = true; video.play().catch(() => {}); }
+    prompt.hidden = false;
+  });
+}
+prompt.addEventListener('click', () => {
+  prompt.hidden = true; video.muted = false;
+  if (playingToken != null) video.play().catch(() => {});
+  syncMusic();
+});
+
+function syncMedia() {
+  const v = S.video;
+  if (v && v.token !== playingToken) {
+    playingToken = v.token;
+    video.src = mediaURL(v.file);
+    layer.classList.add('on');
+    tryPlay(video);
+  } else if (!v && playingToken !== null) {
+    playingToken = null; // host skipped it
+  }
+  if (!v) { layer.classList.remove('on'); if (!video.paused) video.pause(); }
+  syncMusic();
+}
+function syncMusic() {
+  const want = S && S.music && !S.video ? S.music : null;
+  if (want && want !== musicFile) { musicFile = want; music.src = mediaURL(want); }
+  if (want) { if (music.paused) tryPlay(music); }
+  else if (!music.paused) music.pause(); // pausing keeps its place, so it resumes after videos
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', role: 'overlay', screen: 'board' }));
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.type === 'state') { S = m; render(); syncMedia(); } };
+  ws.onclose = () => setTimeout(connect, 1500);
+}
+connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1430">
+<title>Dragon Heist Jeopardy</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐉</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,700;1,400&family=Alegreya+Sans:wght@400;700&family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <section id="join" class="join" hidden>
+    <h1 class="wordmark">Dragon Heist Jeopardy<small>How well do you remember Waterdeep?</small></h1>
+    <form id="joinForm">
+      <input id="nameInput" maxlength="24" autocomplete="nickname" placeholder="Your name" required>
+      <button class="btn gold" type="submit">Join game</button>
+      <div class="error" id="joinError"></div>
+    </form>
+    <p>Keep this page open. Your score follows you if you lose connection.</p>
+  </section>
+
+  <section id="game" hidden>
+    <div class="topbar">
+      <h1 class="wordmark">Dragon Heist<small>Jeopardy</small></h1>
+      <div class="me" id="me"></div>
+    </div>
+    <div class="board" id="board"></div>
+    <div class="scores">
+      <h2>Scores</h2>
+      <div id="scores"></div>
+      <p><button class="btn quiet small" id="rename" type="button">Change my name</button></p>
+    </div>
+  </section>
+</div>
+<div id="overlay"></div>
+<div class="conn" id="conn" hidden>Reconnecting…</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => (n < 0 ? '−' : '') + Math.abs(n).toLocaleString();
+function setHTML(el, html) { if (el._h !== html) { el.innerHTML = html; el._h = html; } }
+
+let pid = localStorage.getItem('jp_id');
+if (!pid) {
+  pid = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+  localStorage.setItem('jp_id', pid);
+}
+$('#nameInput').value = localStorage.getItem('jp_name') || '';
+
+let ws, S = null, renaming = false;
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => { $('#conn').hidden = true; ws.send(JSON.stringify({ type: 'hello', role: 'player', id: pid })); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'state') { S = m; render(); }
+    if (m.type === 'error') $('#joinError').textContent = m.message;
+  };
+  ws.onclose = () => { $('#conn').hidden = false; setTimeout(connect, 1500); };
+}
+const sendMsg = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (!ws || ws.readyState > 1)) connect();
+});
+
+$('#joinForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('#nameInput').value.trim();
+  if (!name) return;
+  localStorage.setItem('jp_name', name);
+  renaming = false;
+  sendMsg({ type: 'join', name });
+});
+$('#rename').addEventListener('click', () => { renaming = true; render(); });
+
+const nameOf = id => (S.players.find(p => p.id === id) || {}).name || 'Someone';
+
+function render() {
+  if (!S) return;
+  const me = S.you;
+  $('#join').hidden = !!me && !renaming;
+  $('#game').hidden = !me || renaming;
+  if (!me || renaming) { setHTML($('#overlay'), ''); return; }
+
+  setHTML($('#me'), `<span class="name">${esc(me.name)}</span><span class="score ${me.score < 0 ? 'neg' : ''}">${fmt(me.score)}</span>`);
+
+  const cur = S.current;
+  let b = '';
+  S.categories.forEach(c => { b += `<div class="cat">${esc(c)}</div>`; });
+  const rows = S.values[0].length;
+  for (let r = 0; r < rows; r++) {
+    S.categories.forEach((_, c) => {
+      const used = S.used[c][r];
+      const active = cur && cur.c === c && cur.r === r;
+      b += `<div class="tile ${used ? 'used' : ''} ${active ? 'active' : ''}">${used ? '' : S.values[c][r]}</div>`;
+    });
+  }
+  const board = $('#board');
+  board.style.setProperty('--cols', S.categories.length);
+  setHTML(board, b);
+
+  setHTML($('#scores'), S.players.map(p => `
+    <div class="score-row ${p.id === me.id ? 'me-row' : ''}">
+      <span class="dot ${p.online ? '' : 'off'}" title="${p.online ? 'Online' : 'Offline'}"></span>
+      <span class="who">${esc(p.name)}</span>
+      <span class="pts ${p.score < 0 ? 'neg' : ''}">${fmt(p.score)}</span>
+    </div>`).join('') || '<p>No one has joined yet.</p>');
+
+  setHTML($('#overlay'), overlayHTML(me));
+}
+
+function wagerForm(kind, max) {
+  return `<form data-wager="${kind}">
+    <input type="number" inputmode="numeric" min="0" max="${max}" step="1" placeholder="0 to ${max}" required>
+    <button class="btn gold" type="submit">Lock in wager</button>
+    <small>You can wager up to ${fmt(max)}.</small>
+  </form>`;
+}
+
+function overlayHTML(me) {
+  const f = S.final, cur = S.current;
+  if (f.phase !== 'off') return `<div class="overlay"><div class="card">${finalHTML(f, me)}</div></div>`;
+  if (!cur) return '';
+
+  const meta = `<div class="meta"><span>${esc(cur.category)}</span><b>${cur.isDD && cur.ddWager != null ? 'Wager ' + fmt(cur.ddWager) : fmt(cur.value)}</b></div>`;
+
+  if (cur.phase === 'transition') {
+    return `<div class="overlay"><div class="card">${cur.isDD ? '<div class="seal">Daily<br>Double</div>' : ''}<div class="meta"><span>${esc(cur.category)}</span><b>${fmt(cur.value)}</b></div>
+      <p class="clue">Get ready…</p><div class="status">Watch the stream!</div></div></div>`;
+  }
+  if (cur.phase === 'dd') {
+    let body;
+    if (!cur.ddPlayer) body = '<p>The host is choosing who takes it.</p>';
+    else if (cur.ddPlayer === me.id) {
+      body = cur.ddWager == null
+        ? '<p><b>It’s yours!</b> How much will you risk?</p>' + wagerForm('dd', Math.max(me.score, S.maxValue))
+        : `<p>You wagered <b>${fmt(cur.ddWager)}</b>. The clue is coming up.</p>`;
+    } else body = `<p>${esc(nameOf(cur.ddPlayer))} is ${cur.ddWager == null ? 'deciding on a wager…' : `wagering <b>${fmt(cur.ddWager)}</b>.`}</p>`;
+    return `<div class="overlay"><div class="card"><div class="seal">Daily<br>Double</div>${meta}${body}</div></div>`;
+  }
+
+  // clue phase
+  const pos = cur.queue.indexOf(me.id);
+  const result = cur.results[me.id];
+  let status = '', canBuzz = false;
+  if (cur.isDD) status = cur.ddPlayer === me.id ? (result ? '' : 'Your Daily Double. Answer out loud!') : `${esc(nameOf(cur.ddPlayer))}’s Daily Double`;
+  else if (cur.answerShown) status = '';
+  else if (cur.locked.includes(me.id)) status = 'You’re locked out of this one.';
+  else if (pos === 0) status = 'You’re up! Answer out loud.';
+  else if (pos > 0) status = `You buzzed in. You’re #${pos + 1} in line.`;
+  else if (cur.buzzOpen) { status = 'Buzzers are open!'; canBuzz = true; }
+  else status = 'Buzzers open after the host reads the clue.';
+  if (result === 'correct') status = 'Correct! Points added.';
+  if (result === 'wrong' && !cur.answerShown && !cur.isDD) status = 'Not quite. You’re locked out of this one.';
+  if (result === 'wrong' && cur.isDD) status = 'Not quite. Wager deducted.';
+
+  const firstUp = !cur.isDD && cur.queue.length && cur.queue[0] !== me.id ? `<p>${esc(nameOf(cur.queue[0]))} buzzed in first.</p>` : '';
+  const buzzer = !cur.isDD && !cur.answerShown
+    ? `<button class="buzz" ${canBuzz ? '' : 'disabled'} type="button">Buzz</button>` : '';
+  const answer = cur.answerShown && cur.answer ? `<div class="answer">${esc(cur.answer)}</div>` : '';
+  return `<div class="overlay"><div class="card">${meta}<div class="clue">${esc(cur.clue)}</div>${answer}
+    <div class="status">${status}</div>${firstUp}${buzzer}</div></div>`;
+}
+
+function finalHTML(f, me) {
+  const head = `<div class="meta"><span>Final Jeopardy</span><b>${esc(f.category)}</b></div>`;
+  const mine = f.mine || {};
+  if (f.phase === 'wager') {
+    const max = Math.max(me.score, 0);
+    return head + `<p>The category is <b>${esc(f.category)}</b>.</p>` +
+      (mine.wager == null ? wagerForm('final', max) : `<p>Wager locked in: <b>${fmt(mine.wager)}</b>. Waiting for the clue…</p>`);
+  }
+  if (f.phase === 'clue') {
+    return head + `<div class="clue">${esc(f.clue)}</div>` + (mine.response == null
+      ? `<form data-final-response><input type="text" maxlength="200" placeholder="Your answer" required autocomplete="off">
+         <button class="btn gold" type="submit">Lock in answer</button></form>`
+      : `<p>Answer locked in: <i>${esc(mine.response) || '(blank)'}</i></p>`);
+  }
+  if (f.phase === 'judging') {
+    return head + `<div class="clue">${esc(f.clue)}</div><p>Answers are locked. The host is judging…</p>`;
+  }
+  // reveal
+  const rows = S.players.map(p => {
+    const j = f.judged[p.id];
+    const w = f.wagers[p.id] ?? 0;
+    const mark = j === 'correct' ? `<span class="mark-correct">+${fmt(w)}</span>` : j === 'wrong' ? `<span class="mark-wrong">−${fmt(w)}</span>` : '';
+    return `<li><b>${esc(p.name)}</b><span class="resp">${esc(f.responses[p.id] ?? '(no answer)')}</span>${mark}</li>`;
+  }).join('');
+  return head + `<div class="clue">${esc(f.clue)}</div><div class="answer">${esc(f.answer)}</div><ul class="reveal-list">${rows}</ul>`;
+}
+
+document.addEventListener('submit', e => {
+  const form = e.target;
+  if (form.dataset.wager) {
+    e.preventDefault();
+    const amount = Number(form.querySelector('input').value);
+    sendMsg({ type: form.dataset.wager === 'dd' ? 'ddWager' : 'finalWager', amount });
+  } else if (form.hasAttribute('data-final-response')) {
+    e.preventDefault();
+    sendMsg({ type: 'finalResponse', text: form.querySelector('input').value });
+  }
+});
+// pointerdown is faster than click, which matters for buzzing.
+document.addEventListener('pointerdown', e => {
+  const b = e.target.closest('.buzz');
+  if (b && !b.disabled) { sendMsg({ type: 'buzz' }); if (navigator.vibrate) navigator.vibrate(40); b.disabled = true; }
+});
+
+connect();
+</script>
+</body>
+</html>

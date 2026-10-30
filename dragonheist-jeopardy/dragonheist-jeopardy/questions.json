@@ -1,0 +1,171 @@
+{
+  "title": "Dragon Heist Jeopardy",
+  "media": {
+    "folder": "Transition Materials",
+    "intro": "Dragon Heist Jeopardy Intro.mp4",
+    "dailyDouble": "Daily Double.mp4",
+    "music": "15 minutes of the Jeopardy think music.mp3"
+  },
+  "categories": [
+    {
+      "name": "Welcome to the Yawning Portal",
+      "video": "Yawning Portal Video.mp4",
+      "clues": [
+        {
+          "value": 100,
+          "clue": "This retired adventurer runs the Yawning Portal",
+          "answer": "Who is Durnan?"
+        },
+        {
+          "value": 200,
+          "clue": "The group has occasionally met with any of these characters at the Yawning Portal as we regroup",
+          "answer": "Many answers! (Host's call)"
+        },
+        {
+          "value": 300,
+          "clue": "This famous traveling author hires the party to find his missing friend",
+          "answer": "Who is Volo (Volothamp Geddarm)?"
+        },
+        {
+          "value": 400,
+          "clue": "Volo's missing friend",
+          "answer": "Who is Floon Blagmar?"
+        },
+        {
+          "value": 500,
+          "clue": "Volo pays the party with the deed to this property",
+          "answer": "What is Trollskull Manor (now the Banshee's Wail)?"
+        }
+      ]
+    },
+    {
+      "name": "The Banshee's Wail",
+      "video": "The Banshee's Wail.mp4",
+      "clues": [
+        {
+          "value": 100,
+          "clue": "This poltergeist haunts your tavern",
+          "answer": "Who is Lif?"
+        },
+        {
+          "value": 200,
+          "clue": "This was the cost we paid to open the bar",
+          "answer": "What is 250 gold?"
+        },
+        {
+          "value": 300,
+          "clue": "The amount Renaer offered us in the form of a \"cashier's check\" (to the 100s)",
+          "answer": "What is 1,050 gold?"
+        },
+        {
+          "value": 400,
+          "clue": "Tally runs this carpentry shop in the alley",
+          "answer": "What is the Bent Nail?"
+        },
+        {
+          "value": 500,
+          "clue": "Vincent Trench, private investigator, runs this agency (we never use this resource. Ever)",
+          "answer": "What is the Tiger's Eye?"
+        }
+      ]
+    },
+    {
+      "name": "Waterdeep",
+      "video": "Waterdeep Video.mp4",
+      "clues": [
+        {
+          "value": 100,
+          "clue": "Waterdeep's nickname",
+          "answer": "What is the City of Splendors?"
+        },
+        {
+          "value": 200,
+          "clue": "This Lord is highly suspected of embezzlement from the city",
+          "answer": "Who is Lord Neverember?"
+        },
+        {
+          "value": 300,
+          "clue": "The name of the Lady taken hostage in exchange for the Stone of Golorr",
+          "answer": "Who is Lady Yalah?"
+        },
+        {
+          "value": 400,
+          "clue": "Waterdeep's copper coin",
+          "answer": "What is a nib?"
+        },
+        {
+          "value": 500,
+          "clue": "The cost purportedly paid for a nimblewright",
+          "answer": "What is 25,000 gold?"
+        }
+      ]
+    },
+    {
+      "name": "Factions & Foes",
+      "video": "Factions and Foes.mp4",
+      "clues": [
+        {
+          "value": 100,
+          "clue": "This beholder crime lord rules beneath the city",
+          "answer": "Who is the Xanathar?"
+        },
+        {
+          "value": 200,
+          "clue": "The name of the ship we robbed (wow, we're kind of pirates)",
+          "answer": "What is the Sea Maiden's Faire?"
+        },
+        {
+          "value": 300,
+          "clue": "This faction is also called the Black Network",
+          "answer": "What is the Zhentarim?"
+        },
+        {
+          "value": 400,
+          "clue": "Renaer's father, the ousted former Open Lord",
+          "answer": "Who is Dagult Neverember?"
+        },
+        {
+          "value": 500,
+          "clue": "The captain of the ship we robbed (he's kind of our rival pirate if you think about it)",
+          "answer": "Who is Captain Zardoz Zord?"
+        }
+      ]
+    },
+    {
+      "name": "General D&D",
+      "video": "General DnD.mp4",
+      "clues": [
+        {
+          "value": 100,
+          "clue": "Rolling two d20s and keeping the higher roll",
+          "answer": "What is advantage?"
+        },
+        {
+          "value": 200,
+          "clue": "A natural 20 on an attack roll",
+          "answer": "What is a critical hit?"
+        },
+        {
+          "value": 300,
+          "clue": "A treasure chest that bites back",
+          "answer": "What is a mimic?"
+        },
+        {
+          "value": 400,
+          "clue": "The spell level of Wish",
+          "answer": "What is 9th level?"
+        },
+        {
+          "value": 500,
+          "clue": "The average cost of a greater healing potion",
+          "answer": "What is 100 gold?"
+        }
+      ]
+    }
+  ],
+  "final": {
+    "category": "The Exchange Rate",
+    "clue": "The conversion rate between Jeopardy points and in-game gold",
+    "answer": "Ask Vaughn!"
+  }
+}
