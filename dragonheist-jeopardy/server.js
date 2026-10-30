@@ -69,8 +69,13 @@ function onlineIds() {
   wss.clients.forEach(ws => { if (ws.readyState === 1 && ws.playerId) s.add(ws.playerId); });
   return s;
 }
-function baseView() {
+function baseView(isHost) {
   const online = onlineIds();
+  // While the host judges Final Jeopardy, everyone else keeps seeing pre-final scores until the reveal.
+  const f = state.final;
+  const shownScore = (id, p) => (!isHost && f.phase === 'judging')
+    ? p.score - sign(f.judged[id]) * (f.wagers[id] || 0)
+    : p.score;
   return {
     title: Q.title,
     categories: Q.categories.map(c => c.name),
@@ -78,7 +83,7 @@ function baseView() {
     maxValue: MAX_VALUE,
     used: state.used,
     players: Object.entries(state.players)
-      .map(([id, p]) => ({ id, name: p.name, score: p.score, online: online.has(id) }))
+      .map(([id, p], seat) => ({ id, seat, name: p.name, score: shownScore(id, p), online: online.has(id) }))
       .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)),
   };
 }
@@ -116,15 +121,17 @@ function finalView(isHost, pid) {
 
 function send(ws, obj) { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 function broadcast() {
-  const base = baseView();
+  const views = { host: baseView(true), other: baseView(false) };
   wss.clients.forEach(ws => {
     if (ws.readyState !== 1 || !ws.role) return;
     const isHost = ws.role === 'host';
+    const base = isHost ? views.host : views.other;
     const msg = { type: 'state', ...base, current: currentView(isHost), final: finalView(isHost, isHost ? null : ws.playerId) };
     if (isHost) { msg.dailyDouble = state.dailyDouble; msg.questions = Q; }
     else {
       const p = state.players[ws.playerId];
-      msg.you = p ? { id: ws.playerId, name: p.name, score: p.score } : null;
+      const mine = base.players.find(x => x.id === ws.playerId);
+      msg.you = p ? { id: ws.playerId, name: p.name, score: mine ? mine.score : p.score } : null;
     }
     send(ws, msg);
   });
@@ -297,6 +304,7 @@ function handleHost(ws, m) {
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/host', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'host.html')));
+app.get('/overlay', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'overlay.html')));
 app.get('/health', (_req, res) => res.send('ok'));
 
 const server = http.createServer(app);
@@ -313,6 +321,8 @@ wss.on('connection', ws => {
         if (m.role === 'host') {
           if (m.password !== ADMIN_PASSWORD) return send(ws, { type: 'error', code: 'bad_password', message: 'That password doesn’t match ADMIN_PASSWORD.' });
           ws.role = 'host';
+        } else if (m.role === 'overlay') {
+          ws.role = 'overlay'; // read-only stream view, sees what players see
         } else {
           const id = cleanId(m.id);
           if (!id) return;
